@@ -3,13 +3,86 @@
 import logging
 
 import re
+import bs4.element
 import praw
 import requests
+from bs4 import BeautifulSoup
+from dataclasses import dataclass
+
+
+@dataclass
+class Info:
+    name: str
+    investment_type: str
+    underlying: str
+    link: str
+    knockout: str
+    strike_date: str
+    strike_price: str
+
+
+def get_infos(wkn: str) -> Info:
+    """
+    Gets the needed information from onvista
+    :param wkn: wkn to search for
+    :return: Info object
+    """
+    onvista_request = requests.get(f"https://onvista.de/{wkn}")
+    if not onvista_request.ok:
+        return "Onvista-Seite nicht erreichbar"
+
+    link = onvista_request.url
+    # Type of investment
+    investment_type = re.search("https://www.onvista.de/(.*)/", link).group(1)
+
+    investment_types = {
+        "derivate/knockout": "KO",
+        "aktien": "Aktie",
+        "etf": "ETF",
+        "anleihen": "Anleihe",
+        "index": "Index"
+    }
+    investment_type = investment_types.get(investment_type, investment_type)
+    soup = BeautifulSoup(onvista_request.content, "html.parser")
+    name = soup.find("h1").text
+
+    # Get Underlying if possible
+    underlying = None
+    for item in soup.find_all("h3"):
+        if "".join(item.text.split()) == "Basiswert":
+            for sibling in item.next_siblings:
+                if sibling.find("a") != -1:
+                    underlying = sibling.find("a").text
+
+    knockout_price = None
+    strike_date = None
+    strike_price = None
+
+    if underlying is not None:
+        for item in soup.find_all("span"):
+            # Get KO if possible
+            if "".join(item.text.split()) == "Knock-OutSchwelle":
+                for sibling in item.next_siblings:
+                    if isinstance(sibling, bs4.element.Tag):
+                        knockout_price = "".join(sibling.text.split())
+            # Get Strike Date if possible
+            if "".join(item.text.split()) == "Fälligkeit":
+                for sibling in item.next_siblings:
+                    if isinstance(sibling, bs4.element.Tag):
+                        strike_date = "".join(sibling.text.split())
+            # Get Strike price
+            if "".join(item.text.split()) == "Basispreis":
+                for sibling in item.next_siblings:
+                    if isinstance(sibling, bs4.element.Tag):
+                        strike_price = "".join(sibling.text.split())
+
+    # Remove strike_price from knockouts
+    strike_price = strike_price if knockout_price is None else None
+
+    return Info(name, investment_type, underlying, link, knockout_price, strike_date, strike_price)
 
 if __name__ == '__main__':
-
-    #print("Start logger")
-
+    # print("Start logger")
     #handler = logging.StreamHandler()
     #handler.setLevel(logging.DEBUG)
     #for logger_name in ("praw", "prawcore"):
@@ -70,18 +143,18 @@ if __name__ == '__main__':
                     print(antwort)
                     comment.reply(antwort)
 
-        # # Finde passende Posts
-        # if len(submission.title.split()) > 10:
-        #     return
-        #
-        # questions = ["what is", "who is", "what are"]
-        # normalized_title = submission.title.lower()
-        # for question_phrase in questions:
-        #     if question_phrase in normalized_title:
-        #         # mache etwas
-        #         from urllib.parse import quote_plus
-        #         reply_template = "[Let me google that for you](https://lmgtfy.com/?q={})"
-        #         url_title = quote_plus(submission.title)
-        #         reply_text = reply_template.format(url_title)
-        #         submission.reply(reply_text)
-        #         break
+    # # Finde passende Posts
+    # if len(submission.title.split()) > 10:
+    #     return
+    #
+    # questions = ["what is", "who is", "what are"]
+    # normalized_title = submission.title.lower()
+    # for question_phrase in questions:
+    #     if question_phrase in normalized_title:
+    #         # mache etwas
+    #         from urllib.parse import quote_plus
+    #         reply_template = "[Let me google that for you](https://lmgtfy.com/?q={})"
+    #         url_title = quote_plus(submission.title)
+    #         reply_text = reply_template.format(url_title)
+    #         submission.reply(reply_text)
+    #         break
